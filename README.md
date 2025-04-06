@@ -10,7 +10,7 @@ NSA-Torch is a pure PyTorch implementation of [Native Sparse Attention: Hardware
 1. **Clone the Repository:**
 
    ```bash
-   git clone https://github.com/your_username/NSA-Torch.git
+   git clone https://github.com/not-heavychevy/NSA-Torch.git
    cd NSA-Torch
    ```
 2. **Install Dependencies:**
