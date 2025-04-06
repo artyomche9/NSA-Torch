@@ -35,10 +35,52 @@ class NSA(nn.Module):
         # Reshape to [B, n_blocks, bs, D]
         x_blocks = x.view(B, n_blocks, bs, D)
         return x_blocks.mean(dim=2)
-
-    def forward(self, queries, keys, values, gate_cmp):
+    
+    def selective_branch(self, queries, comp_keys, comp_values, gate):
+        """
+        Implements the selection branch: for each query, compute attention scores over the 
+        compressed representations, select the top-k blocks, and aggregate the corresponding values.
         
-        # Compression branch: aggregate keys and values into blocks
+        Args:
+            queries: [B, T, D]
+            comp_keys, comp_values: [B, n_blocks, D]
+            gate: [B, T] or [B, T, 1] – weighting factor for this branch.
+        
+        Returns:
+            Output of the selection branch with shape [B, T, D]
+        """
+        B, T, D = queries.shape
+        scale = D ** -0.5
+        # Compute raw attention scores between queries and compressed keys
+        scores = torch.bmm(queries, comp_keys.transpose(1, 2)) * scale  # [B, T, n_blocks]
+
+        # Create causal mask: each query can only attend to blocks corresponding to tokens before it.
+        block_ids = torch.div(torch.arange(T, device=queries.device), self.block_size, rounding_mode='floor')
+        block_ids = block_ids.unsqueeze(0).expand(B, T)  # [B, T]
+        mask = block_ids.unsqueeze(2) < torch.arange(comp_keys.size(1), device=queries.device).unsqueeze(0).unsqueeze(0)
+        scores = scores.masked_fill(mask, float('-inf'))
+        probs = F.softmax(scores, dim=-1)  # [B, T, n_blocks]
+
+        # Select top-k blocks for each query
+        topk = min(self.topk_blocks, comp_keys.size(1))
+        topk_vals, topk_inds = torch.topk(probs, topk, dim=-1)  # [B, T, topk]
+
+        # Gather corresponding value representations for the selected blocks
+        gathered_vals = []
+        for b in range(B):
+            gathered = comp_values[b][topk_inds[b]]  # [T, topk, D]
+            gathered_vals.append(gathered)
+        gathered_vals = torch.stack(gathered_vals, dim=0)  # [B, T, topk, D]
+
+        # Aggregate the values using the attention weights of the selected blocks
+        sel_out = (topk_vals.unsqueeze(-1) * gathered_vals).sum(dim=2)  # [B, T, D]
+        if gate.dim() == 2:
+            gate = gate.unsqueeze(-1)
+        return sel_out * gate
+
+    def forward(self, queries, keys, values, gate_cmp,gate_slc):
+
+        # Compression branch
         comp_K = self.compress_tokens(keys)   # [B, n_blocks, D]
         comp_V = self.compress_tokens(values)   # [B, n_blocks, D]
 
@@ -49,3 +91,6 @@ class NSA(nn.Module):
         if gate_cmp.dim() == 2:
             gate_cmp = gate_cmp.unsqueeze(-1)
         comp_out = comp_out * gate_cmp
+
+        # Selection branch
+        sel_out = self.selective_branch(queries, comp_K, comp_V, gate_slc)
