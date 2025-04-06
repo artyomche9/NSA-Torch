@@ -15,10 +15,10 @@ NSA-Torch is a pure PyTorch implementation of [Native Sparse Attention: Hardware
    ```
 2. **Install Dependencies:**
 
-It is recommended to use a virtual environment. Then install the required packages:
-```bash
-pip install -r requirements.txt
-```
+   It is recommended to use a virtual environment. Then install the required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Usage
 
@@ -67,8 +67,6 @@ This project is licensed under the [MIT License](LICENSE).
 ## Contributing
 
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/artyomche9/NSA-Torch/issues).
-
----
 
 ## Acknowledgments
 
