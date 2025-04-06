@@ -77,8 +77,37 @@ class NSA(nn.Module):
         if gate.dim() == 2:
             gate = gate.unsqueeze(-1)
         return sel_out * gate
+    
+    def sliding_branch(self, queries, keys, values, gate):
+        """
+        Implements the sliding window branch: for each query, compute local attention over the 
+        last 'window_size' tokens of the original sequence.
+        
+        Args:
+            queries, keys, values: [B, T, D]
+            gate: [B, T] or [B, T, 1]
+        
+        Returns:
+            Output of the sliding window branch with shape [B, T, D]
+        """
+        B, T, D = queries.shape
+        scale = D ** -0.5
+        local_out = torch.zeros_like(queries)
 
-    def forward(self, queries, keys, values, gate_cmp,gate_slc):
+        for t in range(T):
+            start = max(0, t - self.window_size + 1)
+            q_t = queries[:, t:t+1, :]         # [B, 1, D]
+            k_slice = keys[:, start:t+1, :]      # [B, L, D]
+            v_slice = values[:, start:t+1, :]    # [B, L, D]
+            attn = torch.bmm(q_t, k_slice.transpose(1, 2)) * scale  # [B, 1, L]
+            attn = F.softmax(attn, dim=-1)
+            context = torch.bmm(attn, v_slice)   # [B, 1, D]
+            local_out[:, t, :] = context.squeeze(1)
+        if gate.dim() == 2:
+            gate = gate.unsqueeze(-1)
+        return local_out * gate
+
+    def forward(self, queries, keys, values, gate_cmp, gate_slc, gate_swa):
 
         # Compression branch
         comp_K = self.compress_tokens(keys)   # [B, n_blocks, D]
@@ -94,3 +123,12 @@ class NSA(nn.Module):
 
         # Selection branch
         sel_out = self.selective_branch(queries, comp_K, comp_V, gate_slc)
+
+        # Sliding window branch
+        if self.window_size > 0:
+            slide_out = self.sliding_branch(queries, keys, values, gate_swa)
+        else:
+            slide_out = torch.zeros_like(queries)
+            
+        # Sum the outputs of all three branches
+        return comp_out + sel_out + slide_out
